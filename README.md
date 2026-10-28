@@ -104,7 +104,7 @@ Dockerfile, docker-compose.yml, install.sh  # установка через Dock
 Stockfish, Python и зависимости уже внутри образа.
 
 ```bash
-git clone <URL_РЕПОЗИТОРИЯ> chess-tgbot
+git clone https://github.com/peach25/tgChessBot.git chess-tgbot
 cd chess-tgbot
 ./install.sh          # создаст .env из шаблона и попросит его заполнить
 nano .env             # вписать TELEGRAM_BOT_TOKEN и ADMIN_TELEGRAM_ID
