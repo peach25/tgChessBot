@@ -26,7 +26,7 @@ from telegram.ext import ContextTypes
 
 import chess_api
 import config
-from analyzer import AnalysisError, Analyzer, GameAnalysis
+from analyzer import AnalysisError, Analyzer, GameAnalysis, Highlight
 from db import Database, User
 
 log = logging.getLogger(__name__)
@@ -69,6 +69,9 @@ CATEGORY_MARKS = {"blunder": "??", "mistake": "?", "inaccuracy": "?!"}
 CATEGORY_ICONS = {"blunder": "🔴", "mistake": "🟠", "inaccuracy": "🟡", None: "⚪"}
 
 
+PUNISHED_NAMES = {"blunder": "зевок", "mistake": "ошибку"}
+
+
 def _acpl_icon(acpl: int) -> str:
     """Цвет средней потери: зелёный — чистая игра, красный — много потерь."""
     if acpl < 30:
@@ -78,6 +81,32 @@ def _acpl_icon(acpl: int) -> str:
     if acpl < 100:
         return "🟠"
     return "🔴"
+
+
+def _accuracy_icon(accuracy: float) -> str:
+    if accuracy >= 90:
+        return "🟢"
+    if accuracy >= 80:
+        return "🟡"
+    if accuracy >= 70:
+        return "🟠"
+    return "🔴"
+
+
+def _format_highlight(h: Highlight, color: chess.Color) -> list[str]:
+    m = h.move
+    if h.kind == "only":
+        return [
+            f"❗ {m.label} <b>{html.escape(m.san)}</b>! — единственный ход",
+            f"      {m.after.text(color)} · следующий по силе: {m.second.text(color)}",
+        ]
+    prev = h.opponent_move
+    prev_mark = CATEGORY_MARKS.get(prev.category, "")
+    return [
+        f"💪 {m.label} <b>{html.escape(m.san)}</b> — наказал за {PUNISHED_NAMES[prev.category]} "
+        f"{prev.label} {html.escape(prev.san)}{prev_mark}",
+        f"      было {prev.before.text(color)} → стало {m.after.text(color)}",
+    ]
 
 
 def format_report(username: str, g: chess_api.Game, analysis: GameAnalysis | None, error: str | None) -> str:
@@ -107,13 +136,21 @@ def format_report(username: str, g: chess_api.Game, analysis: GameAnalysis | Non
     name = html.escape(me.username)
     lines += [
         f"🔍 Ходы <b>{name}</b> (Stockfish, глубина {analysis.depth})",
+        f"{_accuracy_icon(mine.accuracy)} Точность: <b>{mine.accuracy:.0f}%</b>",
+        f"⭐ Лучших: <b>{mine.best}</b>   ✅ Хороших: <b>{mine.good}</b>",
         f"🔴 Зевки: <b>{mine.blunders}</b>   🟠 Ошибки: <b>{mine.mistakes}</b>   "
         f"🟡 Неточности: <b>{mine.inaccuracies}</b>",
         f"{_acpl_icon(mine.acpl)} Средняя потеря: <b>{mine.acpl}</b> cp",
+        f"<i>Оценка: «+» — в пользу {name}</i>",
         "",
     ]
+    if mine.highlights:
+        lines.append("<b>Сильные ходы</b>")
+        for h in mine.highlights:
+            lines += _format_highlight(h, my_color)
+        lines.append("")
     if mine.worst:
-        lines.append(f"<b>Худшие ходы</b> (оценка: «+» — в пользу {name}):")
+        lines.append("<b>Худшие ходы</b>")
         for m in mine.worst:
             mark = CATEGORY_MARKS.get(m.category, "")
             better = f" · 💡 лучше <b>{html.escape(m.best_san)}</b>" if m.best_san else ""

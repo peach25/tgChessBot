@@ -5,7 +5,9 @@
   до ±1000 cp, чтобы мат/«мат в N» не давали потерь в десятки тысяч);
 - падение «вероятности выигрыша» (формула Lichess) — по нему ход классифицируется как
   неточность / ошибка / зевок. Так ход «+8 → +5» в выигранной позиции не считается зевком,
-  хотя потеря в cp большая.
+  хотя потеря в cp большая;
+- совпал ли ход с лучшим ходом Stockfish и, если включён STOCKFISH_FIND_ONLY_MOVES (MultiPV 2),
+  насколько хуже был второй по силе ход — так находятся «единственные ходы».
 """
 import asyncio
 import io
@@ -25,6 +27,12 @@ CP_CLAMP = 1000
 MATE_CP = 10_000
 # Падение win% (0–100), начиная с которого ход попадает в категорию
 INACCURACY, MISTAKE, BLUNDER = 10, 20, 30
+# «Хороший» ход — не лучший, но теряет меньше GOOD_MAX_DROP win%
+GOOD_MAX_DROP = 2
+# «Единственный ход»: второй по силе ход хуже минимум на ONLY_MOVE_MIN_GAP win%,
+# и позиция ещё не решена (оценка до хода в пределах ±ONLY_MOVE_MAX_CP)
+ONLY_MOVE_MIN_GAP = 20
+ONLY_MOVE_MAX_CP = 400
 
 
 class AnalysisError(Exception):
@@ -34,6 +42,11 @@ class AnalysisError(Exception):
 def win_percent(cp: int) -> float:
     """Вероятность выигрыша по оценке в cp (формула Lichess)."""
     return 50 + 50 * (2 / (1 + math.exp(-0.00368208 * cp)) - 1)
+
+
+def move_accuracy(win_drop: float) -> float:
+    """Точность хода 0–100 по падению win% (формула Lichess)."""
+    return max(0.0, min(100.0, 103.1668 * math.exp(-0.04354 * win_drop) - 3.1669))
 
 
 @dataclass(frozen=True)
@@ -63,16 +76,22 @@ class MoveAnalysis:
     ply: int  # 0 — первый ход белых
     color: chess.Color
     san: str
-    best_san: str | None
-    before: Eval
+    best_san: str | None  # None, если сыгран лучший ход
+    before: Eval  # оценка до хода (= оценка лучшего хода)
     after: Eval
     cp_loss: int
     win_drop: float
+    second: Eval | None = None  # оценка второго по силе хода (только с MultiPV 2)
+    is_recapture: bool = False  # взятие сразу после взятия соперника (размен)
 
     @property
     def label(self) -> str:
         """Номер хода в нотации: «12.» для белых, «12...» для чёрных."""
         return f"{self.ply // 2 + 1}{'.' if self.color == chess.WHITE else '...'}"
+
+    @property
+    def is_best(self) -> bool:
+        return self.best_san is None
 
     @property
     def category(self) -> str | None:
@@ -84,14 +103,41 @@ class MoveAnalysis:
             return "inaccuracy"
         return None
 
+    @property
+    def only_move_gap(self) -> float:
+        """На сколько win% второй по силе ход хуже сыгранного, если это «единственный ход», иначе 0.
+
+        Не считаются: не лучший ход, вынужденный ход (второго варианта нет), взятие в ответ
+        на взятие (размен — очевидный ход) и ходы в уже решённой позиции.
+        """
+        if not self.is_best or self.second is None or self.is_recapture:
+            return 0.0
+        mine = self.before.pov(self.color)
+        if abs(mine) > ONLY_MOVE_MAX_CP:
+            return 0.0
+        gap = win_percent(mine) - win_percent(self.second.pov(self.color))
+        return gap if gap >= ONLY_MOVE_MIN_GAP else 0.0
+
+
+@dataclass(frozen=True)
+class Highlight:
+    """Сильный ход игрока для отчёта."""
+    kind: str  # "only" — единственный ход, "punish" — наказал за ошибку соперника
+    move: MoveAnalysis
+    opponent_move: MoveAnalysis | None = None  # ошибка соперника, за которую наказали
+
 
 @dataclass
 class SideSummary:
     inaccuracies: int = 0
     mistakes: int = 0
     blunders: int = 0
+    best: int = 0  # совпали с лучшим ходом Stockfish
+    good: int = 0  # не лучшие, но почти без потерь
     acpl: int = 0  # средняя потеря в cp
+    accuracy: float = 0.0  # 0–100
     worst: list[MoveAnalysis] = field(default_factory=list)
+    highlights: list[Highlight] = field(default_factory=list)
 
 
 @dataclass
@@ -99,9 +145,12 @@ class GameAnalysis:
     depth: int
     moves: list[MoveAnalysis]
 
-    def summary(self, color: chess.Color, worst_count: int = 3) -> SideSummary:
+    def summary(self, color: chess.Color, worst_count: int = 3, highlight_count: int = 3) -> SideSummary:
         own = [m for m in self.moves if m.color == color]
         s = SideSummary()
+        if not own:
+            return s
+
         for m in own:
             if m.category == "blunder":
                 s.blunders += 1
@@ -109,10 +158,29 @@ class GameAnalysis:
                 s.mistakes += 1
             elif m.category == "inaccuracy":
                 s.inaccuracies += 1
-        if own:
-            s.acpl = round(sum(m.cp_loss for m in own) / len(own))
+            elif m.is_best:
+                s.best += 1
+            elif m.win_drop < GOOD_MAX_DROP:
+                s.good += 1
+        s.acpl = round(sum(m.cp_loss for m in own) / len(own))
+        s.accuracy = sum(move_accuracy(m.win_drop) for m in own) / len(own)
+
         ranked = sorted((m for m in own if m.cp_loss > 0), key=lambda m: (m.win_drop, m.cp_loss), reverse=True)
         s.worst = sorted(ranked[:worst_count], key=lambda m: m.ply)
+
+        # Сильные ходы: сначала самые «узкие» единственные ходы, затем наказания за самые крупные ошибки
+        only, punish = [], []
+        for i, m in enumerate(self.moves):
+            if m.color != color:
+                continue
+            prev = self.moves[i - 1] if i else None
+            if m.only_move_gap:
+                only.append(Highlight("only", m))
+            elif m.is_best and prev is not None and prev.category in ("mistake", "blunder"):
+                punish.append(Highlight("punish", m, prev))
+        only.sort(key=lambda h: h.move.only_move_gap, reverse=True)
+        punish.sort(key=lambda h: h.opponent_move.win_drop, reverse=True)
+        s.highlights = sorted((only + punish)[:highlight_count], key=lambda h: h.move.ply)
         return s
 
 
@@ -134,6 +202,14 @@ def _terminal_eval(board: chess.Board) -> Eval | None:
     return None
 
 
+@dataclass(frozen=True)
+class _Position:
+    """Результат анализа одной позиции."""
+    eval: Eval
+    best: chess.Move | None = None
+    second: Eval | None = None
+
+
 class Analyzer:
     """Обёртка над процессом Stockfish. Процесс запускается лениво и перезапускается после сбоя.
 
@@ -145,6 +221,8 @@ class Analyzer:
     def __init__(self):
         self._engine: chess.engine.UciProtocol | None = None
         self._limit = chess.engine.Limit(depth=config.STOCKFISH_DEPTH, time=config.STOCKFISH_MOVE_TIME_LIMIT)
+        # Два варианта нужны, чтобы понять, был ли сыгранный ход единственным
+        self._multipv = 2 if config.STOCKFISH_FIND_ONLY_MOVES else 1
 
     async def __aenter__(self) -> "Analyzer":
         return self
@@ -179,16 +257,18 @@ class Analyzer:
             except Exception:
                 pass
 
-    async def _evaluate(self, engine: chess.engine.UciProtocol, board: chess.Board) -> tuple[Eval, chess.Move | None]:
+    async def _evaluate(self, engine: chess.engine.UciProtocol, board: chess.Board) -> _Position:
         terminal = _terminal_eval(board)
         if terminal:
-            return terminal, None
-        info = await engine.analyse(board, self._limit)
-        score = info.get("score")
-        if score is None:
+            return _Position(terminal)
+        infos = await engine.analyse(board, self._limit, multipv=self._multipv)
+        if not infos or infos[0].get("score") is None:
             raise AnalysisError("Stockfish не вернул оценку позиции")
-        pv = info.get("pv") or [None]
-        return _eval_from_score(score), pv[0]
+        pv = infos[0].get("pv") or [None]
+        second = None
+        if len(infos) > 1 and infos[1].get("score") is not None:
+            second = _eval_from_score(infos[1]["score"])
+        return _Position(_eval_from_score(infos[0]["score"]), pv[0], second)
 
     async def analyse_pgn(self, pgn: str) -> GameAnalysis:
         try:
@@ -217,16 +297,23 @@ class Analyzer:
         self, engine: chess.engine.UciProtocol, board: chess.Board, moves: list[chess.Move]
     ) -> GameAnalysis:
         result: list[MoveAnalysis] = []
-        before, best = await self._evaluate(engine, board)
+        pos = await self._evaluate(engine, board)
+        prev_was_capture = False
         for ply, move in enumerate(moves):
             color = board.turn
             san = board.san(move)
-            best_san = board.san(best) if best is not None and best != move else None
+            best_san = board.san(pos.best) if pos.best is not None and pos.best != move else None
+            is_capture = board.is_capture(move)
+            is_recapture = is_capture and prev_was_capture
+            prev_was_capture = is_capture
             board.push(move)
-            after, next_best = await self._evaluate(engine, board)
+            nxt = await self._evaluate(engine, board)
 
+            before, after = pos.eval, nxt.eval
             cp_loss = max(0, before.pov(color) - after.pov(color))
             win_drop = max(0.0, win_percent(before.pov(color)) - win_percent(after.pov(color)))
-            result.append(MoveAnalysis(ply, color, san, best_san, before, after, cp_loss, win_drop))
-            before, best = after, next_best
+            result.append(
+                MoveAnalysis(ply, color, san, best_san, before, after, cp_loss, win_drop, pos.second, is_recapture)
+            )
+            pos = nxt
         return GameAnalysis(depth=config.STOCKFISH_DEPTH, moves=result)

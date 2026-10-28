@@ -62,6 +62,8 @@ STOCKFISH_PATH = os.getenv("STOCKFISH_PATH") or shutil.which("stockfish") or "/u
 STOCKFISH_DEPTH = int(os.getenv("STOCKFISH_DEPTH", "14"))
 STOCKFISH_THREADS = int(os.getenv("STOCKFISH_THREADS", "1"))
 STOCKFISH_HASH_MB = int(os.getenv("STOCKFISH_HASH_MB", "64"))
+# Искать «единственные ходы» (Stockfish считает 2 лучших варианта; анализ примерно в 2,4 раза дольше)
+STOCKFISH_FIND_ONLY_MOVES = (os.getenv("STOCKFISH_FIND_ONLY_MOVES", "").strip().lower() or "1") not in ("0", "false", "no")
 # Предохранители: лимит на одну позицию, на всю партию и на запуск движка (секунды)
 STOCKFISH_MOVE_TIME_LIMIT = float(os.getenv("STOCKFISH_MOVE_TIME_LIMIT", "3"))
 STOCKFISH_GAME_TIMEOUT = float(os.getenv("STOCKFISH_GAME_TIMEOUT", "300"))
