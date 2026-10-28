@@ -1,0 +1,25 @@
+[Unit]
+Description=Chess.com -> Telegram game analysis bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chessbot
+Group=chessbot
+WorkingDirectory=/opt/chess-tgbot
+ExecStart=/opt/chess-tgbot/.venv/bin/python bot.py
+Restart=always
+RestartSec=10
+# Логи в stdout уходят в journald (journalctl -u chess-bot), плюс файл logs/bot.log
+Environment=PYTHONUNBUFFERED=1
+
+# Немного изоляции
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/chess-tgbot
+
+[Install]
+WantedBy=multi-user.target

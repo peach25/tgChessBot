@@ -1,0 +1,19 @@
+services:
+  bot:
+    build: .
+    image: chess-tgbot
+    container_name: chess-tgbot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - bot-data:/app/data
+      - bot-logs:/app/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  bot-data:
+  bot-logs:
