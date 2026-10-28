@@ -65,6 +65,19 @@ def format_time_control(tc: str) -> str:
 
 
 CATEGORY_MARKS = {"blunder": "??", "mistake": "?", "inaccuracy": "?!"}
+# Telegram не умеет цветной текст, поэтому цвет передаём эмодзи (как в разборе Chess.com/Lichess)
+CATEGORY_ICONS = {"blunder": "🔴", "mistake": "🟠", "inaccuracy": "🟡", None: "⚪"}
+
+
+def _acpl_icon(acpl: int) -> str:
+    """Цвет средней потери: зелёный — чистая игра, красный — много потерь."""
+    if acpl < 30:
+        return "🟢"
+    if acpl < 60:
+        return "🟡"
+    if acpl < 100:
+        return "🟠"
+    return "🔴"
 
 
 def format_report(username: str, g: chess_api.Game, analysis: GameAnalysis | None, error: str | None) -> str:
@@ -94,21 +107,23 @@ def format_report(username: str, g: chess_api.Game, analysis: GameAnalysis | Non
     name = html.escape(me.username)
     lines += [
         f"🔍 Ходы <b>{name}</b> (Stockfish, глубина {analysis.depth})",
-        f"Зевков {mine.blunders} · ошибок {mine.mistakes} · неточностей {mine.inaccuracies} · "
-        f"ср. потеря {mine.acpl} cp",
+        f"🔴 Зевки: <b>{mine.blunders}</b>   🟠 Ошибки: <b>{mine.mistakes}</b>   "
+        f"🟡 Неточности: <b>{mine.inaccuracies}</b>",
+        f"{_acpl_icon(mine.acpl)} Средняя потеря: <b>{mine.acpl}</b> cp",
         "",
     ]
     if mine.worst:
-        lines.append(f"Худшие ходы (оценка: «+» — в пользу {name}):")
+        lines.append(f"<b>Худшие ходы</b> (оценка: «+» — в пользу {name}):")
         for m in mine.worst:
             mark = CATEGORY_MARKS.get(m.category, "")
-            better = f", лучше <b>{html.escape(m.best_san)}</b>" if m.best_san else ""
+            better = f" · 💡 лучше <b>{html.escape(m.best_san)}</b>" if m.best_san else ""
             lines.append(
-                f"• {m.label} <b>{html.escape(m.san)}</b>{mark} — потеря {m.cp_loss} cp "
-                f"({m.before.text(my_color)} → {m.after.text(my_color)}){better}"
+                f"{CATEGORY_ICONS[m.category]} {m.label} <b>{html.escape(m.san)}</b>{mark} — "
+                f"<b>−{m.cp_loss}</b> cp"
             )
+            lines.append(f"      {m.before.text(my_color)} → {m.after.text(my_color)}{better}")
     else:
-        lines.append("Ни одного хода с потерей — чистая партия 👍")
+        lines.append("✨ Ни одного хода с потерей — чистая партия!")
     return "\n".join(lines)
 
 
