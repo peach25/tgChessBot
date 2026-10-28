@@ -38,13 +38,24 @@ def win_percent(cp: int) -> float:
 
 @dataclass(frozen=True)
 class Eval:
-    """Оценка позиции с точки зрения белых."""
+    """Оценка позиции; все поля — с точки зрения белых."""
     cp: int  # мат → ±MATE_CP
-    text: str  # «+0.4», «-1.2», «M3», «-M2», «#»
+    mate: int | None = None  # мат в N ходов: >0 — матуют белые, <0 — чёрные
+    checkmate: bool = False  # позиция — уже мат
 
     def pov(self, color: chess.Color) -> int:
         cp = max(-CP_CLAMP, min(CP_CLAMP, self.cp))
         return cp if color == chess.WHITE else -cp
+
+    def text(self, color: chess.Color = chess.WHITE) -> str:
+        """Оценка для показа с точки зрения color: «+1.2» — лучше для него, «M3» — он матует в 3."""
+        if self.checkmate:
+            return "#"
+        sign = 1 if color == chess.WHITE else -1
+        if self.mate is not None:
+            m = self.mate * sign
+            return f"M{m}" if m > 0 else f"-M{-m}"
+        return f"{self.cp * sign / 100:+.1f}"
 
 
 @dataclass(frozen=True)
@@ -109,18 +120,17 @@ def _eval_from_score(score: chess.engine.PovScore) -> Eval:
     white = score.white()
     mate = white.mate()
     if mate is not None:
-        return Eval(cp=MATE_CP if mate > 0 else -MATE_CP, text=f"M{mate}" if mate > 0 else f"-M{-mate}")
-    cp = white.score()
-    return Eval(cp=cp, text=f"{cp / 100:+.1f}")
+        return Eval(cp=MATE_CP if mate > 0 else -MATE_CP, mate=mate)
+    return Eval(cp=white.score())
 
 
 def _terminal_eval(board: chess.Board) -> Eval | None:
     """Оценка конечной позиции без движка (мат/пат/ничья)."""
     if board.is_checkmate():
         # Заматован тот, чей ход
-        return Eval(cp=-MATE_CP if board.turn == chess.WHITE else MATE_CP, text="#")
+        return Eval(cp=-MATE_CP if board.turn == chess.WHITE else MATE_CP, checkmate=True)
     if board.is_stalemate() or board.is_insufficient_material():
-        return Eval(cp=0, text="0.0")
+        return Eval(cp=0)
     return None
 
 

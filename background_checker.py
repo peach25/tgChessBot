@@ -26,7 +26,7 @@ from telegram.ext import ContextTypes
 
 import chess_api
 import config
-from analyzer import AnalysisError, Analyzer, GameAnalysis, SideSummary
+from analyzer import AnalysisError, Analyzer, GameAnalysis
 from db import Database, User
 
 log = logging.getLogger(__name__)
@@ -67,13 +67,6 @@ def format_time_control(tc: str) -> str:
 CATEGORY_MARKS = {"blunder": "??", "mistake": "?", "inaccuracy": "?!"}
 
 
-def _format_side(name: str, s: SideSummary) -> str:
-    return (
-        f"<b>{html.escape(name)}</b>: зевков {s.blunders} · ошибок {s.mistakes} · "
-        f"неточностей {s.inaccuracies} · ср. потеря {s.acpl} cp"
-    )
-
-
 def format_report(username: str, g: chess_api.Game, analysis: GameAnalysis | None, error: str | None) -> str:
     color, me, opp = g.perspective(username)
     outcome = g.outcome(username)
@@ -95,23 +88,24 @@ def format_report(username: str, g: chess_api.Game, analysis: GameAnalysis | Non
         lines.append(f"⚠️ Анализ недоступен: {html.escape(error or 'неизвестная ошибка')}")
         return "\n".join(lines)
 
+    # Отчёт только по ходам отслеживаемого игрока, оценки — с его стороны
     my_color = chess.WHITE if color == "white" else chess.BLACK
     mine = analysis.summary(my_color)
-    theirs = analysis.summary(not my_color)
+    name = html.escape(me.username)
     lines += [
-        f"🔍 Stockfish, глубина {analysis.depth} (оценки — с точки зрения белых)",
-        _format_side(me.username, mine),
-        _format_side(opp.username, theirs),
+        f"🔍 Ходы <b>{name}</b> (Stockfish, глубина {analysis.depth})",
+        f"Зевков {mine.blunders} · ошибок {mine.mistakes} · неточностей {mine.inaccuracies} · "
+        f"ср. потеря {mine.acpl} cp",
         "",
     ]
     if mine.worst:
-        lines.append("Худшие ходы:")
+        lines.append(f"Худшие ходы (оценка: «+» — в пользу {name}):")
         for m in mine.worst:
             mark = CATEGORY_MARKS.get(m.category, "")
             better = f", лучше <b>{html.escape(m.best_san)}</b>" if m.best_san else ""
             lines.append(
                 f"• {m.label} <b>{html.escape(m.san)}</b>{mark} — потеря {m.cp_loss} cp "
-                f"({m.before.text} → {m.after.text}){better}"
+                f"({m.before.text(my_color)} → {m.after.text(my_color)}){better}"
             )
     else:
         lines.append("Ни одного хода с потерей — чистая партия 👍")
