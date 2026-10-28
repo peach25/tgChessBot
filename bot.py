@@ -28,10 +28,6 @@ ASK_USERNAME = 1
 db: Database | None = None  # создаётся в main()
 
 
-def _fmt_dt(dt) -> str:
-    return dt.strftime("%Y-%m-%d %H:%M UTC")
-
-
 def _profile_link(username: str) -> str:
     u = html.escape(username)
     return f'<a href="https://www.chess.com/member/{u}">{u}</a>'
@@ -122,10 +118,10 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     lines = [
         f"Chess.com: {_profile_link(user.chess_username)}",
-        f"Зарегистрирован: {_fmt_dt(user.registered_at)}",
+        f"Зарегистрирован: {config.format_local(user.registered_at)}",
     ]
     if user.updated_at != user.registered_at:
-        lines.append(f"Username изменён: {_fmt_dt(user.updated_at)}")
+        lines.append(f"Username изменён: {config.format_local(user.updated_at)}")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
 
@@ -156,7 +152,7 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     for i, u in enumerate(users, 1):
         lines.append(
             f"{i}. <code>{u.telegram_user_id}</code> → {html.escape(u.chess_username)} · "
-            f"с {u.registered_at:%Y-%m-%d} · партий: {counts.get(u.id, 0)}"
+            f"с {u.registered_at.astimezone(config.TIMEZONE):%d.%m.%Y} · партий: {counts.get(u.id, 0)}"
         )
 
     # Лимит Telegram — 4096 символов на сообщение

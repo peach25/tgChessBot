@@ -145,6 +145,7 @@ docker compose cp bot:/app/data/bot.db ./bot-backup.db
 | `LOG_LEVEL` | нет | `INFO` по умолчанию |
 | `CHESSCOM_USER_AGENT` | нет | Chess.com просит указывать контакт в User-Agent |
 | `HTTP_TIMEOUT` | нет | Таймаут запросов к Chess.com, сек |
+| `TIMEZONE` | нет | Часовой пояс для времени в сообщениях, по умолчанию `Europe/Moscow` (МСК). Любое имя из базы IANA: `Asia/Yekaterinburg`, `UTC`, … |
 | `CHECK_INTERVAL_SECONDS` | нет | Период проверки новых партий, по умолчанию `300` |
 | `MAX_GAMES_PER_CHECK` | нет | Максимум партий одному пользователю за проверку, по умолчанию `5` |
 | `STOCKFISH_PATH` | нет | Путь к Stockfish; по умолчанию `stockfish` из `PATH`, иначе `/usr/games/stockfish` |
@@ -241,7 +242,7 @@ Unit настроен на `Restart=always` — при падении бот п�
 | `telegram_user_id` | Числовой id пользователя Telegram | Идентификация, привязка username; виден админу в `/users` |
 | `chat_id` | Id чата, куда писать | Отправка отчётов |
 | `chess_username` | Username на Chess.com (публичный) | Получение партий через публичный API |
-| `registered_at` | Дата регистрации (UTC) | `/status` |
+| `registered_at` | Дата регистрации (хранится в UTC, показывается в `TIMEZONE`) | `/status` |
 | `updated_at` | Дата последней смены username (UTC) | `/status`; от этого момента отслеживаются новые партии |
 
 **Таблица `processed_games`** — история обработанных партий для каждой записи `users`:

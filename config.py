@@ -3,8 +3,10 @@ import logging
 import os
 import shutil
 import sys
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
@@ -37,6 +39,18 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 # Chess.com просит указывать контакт в User-Agent для публичного API
 CHESSCOM_USER_AGENT = os.getenv("CHESSCOM_USER_AGENT", "chess-tgbot/1.0")
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "15"))
+
+# Часовой пояс для времени в сообщениях (в БД время хранится в UTC)
+try:
+    TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "").strip() or "Europe/Moscow")
+except (ZoneInfoNotFoundError, ValueError):
+    sys.exit(f"Неизвестный часовой пояс TIMEZONE={os.getenv('TIMEZONE')!r}, пример: Europe/Moscow")
+
+
+def format_local(dt: datetime, fmt: str = "%d.%m.%Y %H:%M") -> str:
+    """Время в часовом поясе TIMEZONE с подписью пояса, например «28.10.2026 13:05 MSK»."""
+    local = dt.astimezone(TIMEZONE)
+    return f"{local.strftime(fmt)} {local.strftime('%Z')}"
 
 # Фоновая проверка новых партий
 CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", "300"))

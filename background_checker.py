@@ -84,7 +84,7 @@ def format_report(username: str, g: chess_api.Game, analysis: GameAnalysis | Non
     color, me, opp = g.perspective(username)
     outcome = g.outcome(username)
     reason = opp.result if outcome == "win" else me.result
-    ended = datetime.fromtimestamp(g.end_time, timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    ended = config.format_local(datetime.fromtimestamp(g.end_time, timezone.utc))
     variant = "" if g.rules == "chess" else f" · {html.escape(g.rules)}"
     rated = "рейтинговая" if g.rated else "без рейтинга"
 
